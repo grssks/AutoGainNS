@@ -1,0 +1,16 @@
+# Build outputs & fetched third-party sources
+build/
+out/
+third_party/
+*.obj
+*.lib
+*.exp
+*.pdb
+*.exe
+
+# IDE / OS files
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
