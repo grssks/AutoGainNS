@@ -1,10 +1,8 @@
 #include "plugin/processor.hpp"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
-#include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/vst/vsttypes.h"
 #include <algorithm>
-#include <cstring>
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -134,25 +132,6 @@ tresult PLUGIN_API AutoGainNSProcessor::setState(IBStream* state) {
 
 tresult PLUGIN_API AutoGainNSProcessor::getState(IBStream* state) {
     return writeState(state, params_);
-}
-
-tresult PLUGIN_API AutoGainNSProcessor::notify(IMessage* message) {
-    if (!message) return kInvalidArgument;
-    if (message->getMessageID() && std::strcmp(message->getMessageID(), "ReqTelemetry") == 0) {
-        if (auto* reply = allocateMessage()) {
-            reply->setMessageID("Telemetry");
-            if (auto* attrs = reply->getAttributes()) {
-                attrs->setFloat("inDb", static_cast<double>(dsp_.telemetryInDb()));
-                attrs->setFloat("outDb", static_cast<double>(dsp_.telemetryOutDb()));
-                attrs->setFloat("agcDb", static_cast<double>(dsp_.telemetryAgcDb()));
-                attrs->setFloat("gateGain", static_cast<double>(dsp_.telemetryGateGain()));
-            }
-            sendMessage(reply);
-            reply->release();
-        }
-        return kResultOk;
-    }
-    return AudioEffect::notify(message);
 }
 
 } // namespace autogain

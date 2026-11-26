@@ -18,7 +18,6 @@ namespace autogain {
 namespace {
 
 constexpr const wchar_t* kWndClassName = L"AutoGainNS_VST3_View";
-constexpr UINT_PTR kTelemetryTimerId = 1;
 
 struct ControlRow {
     ParamID id;
@@ -29,36 +28,35 @@ struct ControlRow {
     bool isToggle;
 };
 
-// 540x640 logical layout:
+// 540x610 logical layout:
 // Header:             0..54
-// Live Telemetry:    58..82
-// Preset bar:        88..114
-// Input Routing bar: 120..146
-// Card 1 (Noise):    154..322
-// Card 2 (AutoVol):  330..498
-// Card 3 (Protect):  506..600
-// Footer tip bar:    606..632
+// Preset bar:        62..88
+// Input Routing bar: 94..120
+// Card 1 (Noise):    128..296
+// Card 2 (AutoVol):  304..472
+// Card 3 (Protect):  480..574
+// Footer tip bar:    580..604
 constexpr ControlRow kRows[] = {
-    { kParamHpfHz,            L"Low-Cut Rumble Filter",  L"Removes desk bumps, AC hum & wind below cutoff",     L"NOISE & ROOM CLEANUP", 180, false },
-    { kParamNsStrength,       L"AI Noise Removal",       L"Suppresses fans, keyboard & background hiss",        nullptr,                 214, false },
-    { kParamVadThreshold,     L"Voice Gate Sensitivity", L"Higher = stricter gate; cuts noise between words",   nullptr,                 248, false },
-    { kParamGateFloorDb,      L"Silence Reduction",      L"How much background drops when you stop talking",    nullptr,                 282, false },
-    { kParamAgcEnable,        L"Auto Volume",            L"Automatically evens out quiet and loud speech",      L"AUTOMATIC VOLUME",     356, true  },
-    { kParamTargetLufs,       L"Target Voice Volume",    L"Overall speaking loudness (-16 LUFS = standard)",    nullptr,                 390, false },
-    { kParamAgcMaxBoostDb,    L"Max Volume Boost",       L"Maximum extra gain applied to quiet speech",         nullptr,                 424, false },
-    { kParamAgcSpeed,         L"Leveling Speed",         L"How fast volume adapts between phrases",             nullptr,                 458, false },
-    { kParamLimiterCeilingDb, L"Clip Protection",        L"Stops loud shouts from distorting or clipping",      L"PROTECTION & OUTPUT",  532, false },
-    { kParamOutputGainDb,     L"Final Output Trim",      L"Manual volume adjustment after all processing",      nullptr,                 566, false },
+    { kParamHpfHz,            L"Low-Cut Rumble Filter",  L"Removes desk bumps, AC hum & wind below cutoff",     L"NOISE & ROOM CLEANUP", 154, false },
+    { kParamNsStrength,       L"AI Noise Removal",       L"Suppresses fans, keyboard & background hiss",        nullptr,                 188, false },
+    { kParamVadThreshold,     L"Voice Gate Sensitivity", L"Higher = stricter gate; cuts noise between words",   nullptr,                 222, false },
+    { kParamGateFloorDb,      L"Silence Reduction",      L"How much background drops when you stop talking",    nullptr,                 256, false },
+    { kParamAgcEnable,        L"Auto Volume",            L"Automatically evens out quiet and loud speech",      L"AUTOMATIC VOLUME",     330, true  },
+    { kParamTargetLufs,       L"Target Voice Volume",    L"Overall speaking loudness (-16 LUFS = standard)",    nullptr,                 364, false },
+    { kParamAgcMaxBoostDb,    L"Max Volume Boost",       L"Maximum extra gain applied to quiet speech",         nullptr,                 398, false },
+    { kParamAgcSpeed,         L"Leveling Speed",         L"How fast volume adapts between phrases",             nullptr,                 432, false },
+    { kParamLimiterCeilingDb, L"Clip Protection",        L"Stops loud shouts from distorting or clipping",      L"PROTECTION & OUTPUT",  506, false },
+    { kParamOutputGainDb,     L"Final Output Trim",      L"Manual volume adjustment after all processing",      nullptr,                 540, false },
 };
 
 constexpr RECT kBypassRect = { 370, 13, 452, 39 };
 constexpr RECT kResetRect  = { 460, 13, 524, 39 };
 
 constexpr RECT kPresetRects[kNumPresets] = {
-    { 88,  88, 174, 114 },
-    { 182, 88, 290, 114 },
-    { 298, 88, 407, 114 },
-    { 415, 88, 524, 114 },
+    { 88,  62, 174, 88 },
+    { 182, 62, 290, 88 },
+    { 298, 62, 407, 88 },
+    { 415, 62, 524, 88 },
 };
 
 struct InputModeBtn {
@@ -71,22 +69,22 @@ constexpr InputModeBtn kInputModes[] = {
     {
         L"Auto",
         L"Input Auto: Matches host channel layout (recommended for standard 1-ch USB mics)",
-        { 88, 120, 174, 146 }
+        { 88, 94, 174, 120 }
     },
     {
         L"L+R Mono",
         L"L+R Mono Sum: Mixes stereo input equally into mono (fixes phase/balance mismatch)",
-        { 182, 120, 290, 146 }
+        { 182, 94, 290, 120 }
     },
     {
         L"Left -> Both",
         L"Left -> Both: Uses Channel 1 (Left) for both ears (fixes 2-ch audio interfaces!)",
-        { 298, 120, 407, 146 }
+        { 298, 94, 407, 120 }
     },
     {
         L"Right -> Both",
         L"Right -> Both: Uses Channel 2 (Right) for both ears (if mic is in Input 2)",
-        { 415, 120, 524, 146 }
+        { 415, 94, 524, 120 }
     },
 };
 
@@ -185,11 +183,51 @@ void fillRoundRect(HDC hdc, const RECT& r, int radius, COLORREF fill, COLORREF b
     DeleteObject(pen);
 }
 
+void drawFocusRing(HDC hdc, const RECT& r, int radius, COLORREF col) {
+    HPEN pen = CreatePen(PS_SOLID, 2, col);
+    HGDIOBJ oldPen = SelectObject(hdc, pen);
+    HGDIOBJ oldBr = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    RoundRect(hdc, r.left - 2, r.top - 2, r.right + 2, r.bottom + 2, radius + 2, radius + 2);
+    SelectObject(hdc, oldBr);
+    SelectObject(hdc, oldPen);
+    DeleteObject(pen);
+}
+
+void resetParamToDefault(AutoGainNSController* ctrl, ParamID id) {
+    if (!ctrl) return;
+    const VoiceParams def{};
+    double defNorm = 0.0;
+    switch (id) {
+        case kParamHpfHz:            defNorm = rangeToNorm(def.hpfHz, 20.0, 160.0); break;
+        case kParamNsStrength:       defNorm = def.nsStrength; break;
+        case kParamVadThreshold:     defNorm = rangeToNorm(def.vadThreshold, 0.0, 0.95); break;
+        case kParamGateFloorDb:      defNorm = rangeToNorm(def.gateFloorDb, -60.0, 0.0); break;
+        case kParamTargetLufs:       defNorm = rangeToNorm(def.targetLufs, -28.0, -10.0); break;
+        case kParamAgcMaxBoostDb:    defNorm = rangeToNorm(def.agcMaxBoostDb, 0.0, 30.0); break;
+        case kParamAgcSpeed:         defNorm = def.agcSpeed; break;
+        case kParamLimiterCeilingDb: defNorm = rangeToNorm(def.limiterCeilingDb, -6.0, -0.1); break;
+        case kParamOutputGainDb:     defNorm = rangeToNorm(def.outputGainDb, -12.0, 12.0); break;
+        default: return;
+    }
+    ctrl->beginEdit(id);
+    ctrl->setParamNormalized(id, defNorm);
+    ctrl->performEdit(id, defNorm);
+    ctrl->endEdit(id);
+}
+
 LRESULT CALLBACK ViewWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     auto* view = reinterpret_cast<AutoGainNSView*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
         case WM_ERASEBKGND:
             return 1;
+        case WM_GETDLGCODE:
+            return DLGC_WANTARROWS | DLGC_WANTTAB;
+        case WM_KEYDOWN:
+            if (view) view->handleKeyDown(static_cast<unsigned int>(wParam));
+            return 0;
+        case WM_KILLFOCUS:
+            if (view) view->handleKillFocus();
+            return 0;
         case WM_SETCURSOR:
             if (view && LOWORD(lParam) == HTCLIENT) {
                 SetCursor(LoadCursorW(nullptr, view->isOverInteractive() ? IDC_HAND : IDC_ARROW));
@@ -198,9 +236,6 @@ LRESULT CALLBACK ViewWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             return DefWindowProcW(hwnd, msg, wParam, lParam);
         case WM_PAINT:
             if (view) view->handlePaint();
-            return 0;
-        case WM_TIMER:
-            if (view && wParam == kTelemetryTimerId) view->handleTimer();
             return 0;
         case WM_LBUTTONDOWN:
             if (view) view->handleMouseDown(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
@@ -267,7 +302,6 @@ AutoGainNSView::~AutoGainNSView() {
         controller_->clearActiveView(this);
     }
     if (hwnd_) {
-        KillTimer(static_cast<HWND>(hwnd_), kTelemetryTimerId);
         DestroyWindow(static_cast<HWND>(hwnd_));
         hwnd_ = nullptr;
     }
@@ -385,10 +419,8 @@ tresult PLUGIN_API AutoGainNSView::attached(void* parent, FIDString type) {
 
     hwnd_ = hwnd;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-    SetTimer(hwnd, kTelemetryTimerId, 50, nullptr);
     if (controller_) {
         controller_->setActiveView(this);
-        controller_->requestTelemetry();
     }
     if (!hostScaled_ && plugFrame && std::abs(scaleFactor_ - 1.0f) >= 0.01f) {
         ViewRect target(0, 0, physW, physH);
@@ -403,7 +435,6 @@ tresult PLUGIN_API AutoGainNSView::removed() {
         controller_->clearActiveView(this);
     }
     if (hwnd_) {
-        KillTimer(static_cast<HWND>(hwnd_), kTelemetryTimerId);
         DestroyWindow(static_cast<HWND>(hwnd_));
         hwnd_ = nullptr;
     }
@@ -418,13 +449,6 @@ tresult PLUGIN_API AutoGainNSView::onSize(ViewRect* newSize) {
                    newSize->getWidth(), newSize->getHeight(), TRUE);
     }
     return res;
-}
-
-void AutoGainNSView::handleTimer() {
-    if (controller_) {
-        controller_->requestTelemetry();
-    }
-    refresh();
 }
 
 void AutoGainNSView::handlePaint() {
@@ -443,22 +467,24 @@ void AutoGainNSView::handlePaint() {
     // Palette
     constexpr COLORREF colBg        = RGB(19, 22, 28);
     constexpr COLORREF colHeader    = RGB(24, 28, 36);
-    constexpr COLORREF colCard      = RGB(28, 32, 40);
-    constexpr COLORREF colCardHover = RGB(33, 38, 48);
-    constexpr COLORREF colBorder    = RGB(46, 53, 66);
-    constexpr COLORREF colBtnHover  = RGB(54, 62, 78);
-    constexpr COLORREF colAccent    = RGB(59, 130, 246);
-    constexpr COLORREF colAccentDim = RGB(45, 72, 114);
-    constexpr COLORREF colPresetOn  = RGB(30, 48, 76);
-    constexpr COLORREF colTrack     = RGB(42, 48, 60);
-    constexpr COLORREF colText      = RGB(238, 242, 248);
-    constexpr COLORREF colTextDim   = RGB(115, 126, 144);
-    constexpr COLORREF colMuted     = RGB(150, 163, 182);
-    constexpr COLORREF colDesc      = RGB(118, 130, 148);
-    constexpr COLORREF colDescDim   = RGB(82, 90, 104);
-    constexpr COLORREF colGreen     = RGB(34, 197, 94);
-    constexpr COLORREF colAmber     = RGB(245, 158, 11);
-    constexpr COLORREF colRed       = RGB(220, 62, 62);
+    constexpr COLORREF colCard       = RGB(28, 32, 40);
+    constexpr COLORREF colCardHover  = RGB(33, 38, 48);
+    constexpr COLORREF colBorder     = RGB(46, 53, 66);
+    constexpr COLORREF colCtrlBorder = RGB(100, 114, 138);
+    constexpr COLORREF colBtnHover   = RGB(54, 62, 78);
+    constexpr COLORREF colAccent     = RGB(96, 165, 250);
+    constexpr COLORREF colAccentDim  = RGB(45, 72, 114);
+    constexpr COLORREF colPresetOn   = RGB(30, 48, 76);
+    constexpr COLORREF colTrack      = RGB(42, 48, 60);
+    constexpr COLORREF colText       = RGB(238, 242, 248);
+    constexpr COLORREF colTextDim    = RGB(115, 126, 144);
+    constexpr COLORREF colMuted      = RGB(150, 163, 182);
+    constexpr COLORREF colDesc       = RGB(144, 156, 176);
+    constexpr COLORREF colDescDim    = RGB(82, 90, 104);
+    constexpr COLORREF colGreen      = RGB(34, 197, 94);
+    constexpr COLORREF colRedFill    = RGB(178, 38, 38);
+    constexpr COLORREF colRedBorder  = RGB(239, 68, 68);
+    constexpr COLORREF colRedText    = RGB(248, 113, 113);
 
     RECT full{ 0, 0, physW, physH };
     HBRUSH bgBr = CreateSolidBrush(colBg);
@@ -493,7 +519,8 @@ void AutoGainNSView::handlePaint() {
 
     SelectObject(memDc, fontSub);
     SetTextColor(memDc, colMuted);
-    TextOutW(memDc, sc(16, s), sc(31, s), L"Voice Noise Removal & Auto Volume  •  12 ms Latency", 51);
+    constexpr const wchar_t* kSubtitle = L"Voice Noise Removal & Auto Volume  \x2022  12 ms Latency";
+    TextOutW(memDc, sc(16, s), sc(31, s), kSubtitle, static_cast<int>(std::wcslen(kSubtitle)));
 
     const bool bypassed = controller_ ? (controller_->getParamNormalized(kParamBypass) >= 0.5) : false;
     const bool agcOn = controller_ ? (controller_->getParamNormalized(kParamAgcEnable) >= 0.5) : true;
@@ -501,72 +528,29 @@ void AutoGainNSView::handlePaint() {
         ? std::clamp(static_cast<int>(std::llround(controller_->getParamNormalized(kParamInputMode) * 3.0)), 0, 3)
         : 0;
 
-    // Enabled / Disabled toggle & Reset button
     const COLORREF bypassFill = bypassed
-        ? colRed
+        ? colRedFill
         : (hoverKind_ == HoverKind::Bypass ? RGB(28, 102, 58) : RGB(22, 82, 48));
     const COLORREF bypassBorder = bypassed
-        ? colRed
+        ? colRedBorder
         : (hoverKind_ == HoverKind::Bypass ? colText : colGreen);
     RECT bypassPhys = scRect(kBypassRect, s);
     fillRoundRect(memDc, bypassPhys, sc(8, s), bypassFill, bypassBorder);
     SelectObject(memDc, fontSec);
     SetTextColor(memDc, colText);
     DrawTextW(memDc, bypassed ? L"DISABLED" : L"ENABLED", -1, &bypassPhys, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    if (hasKeyFocus_ && focusIndex_ == 0) drawFocusRing(memDc, bypassPhys, sc(8, s), colAccent);
 
     const COLORREF resetFill = (hoverKind_ == HoverKind::Reset) ? colBtnHover : colCard;
-    const COLORREF resetBorder = (hoverKind_ == HoverKind::Reset) ? colAccent : colBorder;
+    const COLORREF resetBorder = (hoverKind_ == HoverKind::Reset) ? colAccent : colCtrlBorder;
     RECT resetPhys = scRect(kResetRect, s);
     fillRoundRect(memDc, resetPhys, sc(8, s), resetFill, resetBorder);
     DrawTextW(memDc, L"RESET", -1, &resetPhys, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    if (hasKeyFocus_ && focusIndex_ == 1) drawFocusRing(memDc, resetPhys, sc(8, s), colAccent);
 
-    // Live Telemetry Strip (y = 58..82)
-    RECT telCard = scRect(RECT{ 12, 58, kLogicalWidth - 12, 82 }, s);
-    fillRoundRect(memDc, telCard, sc(6, s), colCard, colBorder);
-
-    const float inDb = controller_ ? controller_->telemetryInDb() : -120.0f;
-    const float outDb = controller_ ? controller_->telemetryOutDb() : -120.0f;
-    const float agcDb = controller_ ? controller_->telemetryAgcDb() : 0.0f;
-    const float gateGain = controller_ ? controller_->telemetryGateGain() : 1.0f;
-    const bool gateOpen = (inDb > -80.0f) && (gateGain > 0.7f);
-
-    auto drawMeter = [&](int lx, const wchar_t* tag, float dbVal) {
-        SelectObject(memDc, fontSec);
-        SetTextColor(memDc, colMuted);
-        RECT tR = scRect(RECT{ lx, 58, lx + 28, 82 }, s);
-        DrawTextW(memDc, tag, -1, &tR, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-        RECT barBg = scRect(RECT{ lx + 30, 66, lx + 124, 74 }, s);
-        fillRoundRect(memDc, barBg, sc(4, s), colTrack, colTrack);
-        const float norm = std::clamp((dbVal + 60.0f) / 60.0f, 0.0f, 1.0f);
-        if (norm > 0.01f) {
-            RECT barFill{ barBg.left, barBg.top, barBg.left + static_cast<int>((barBg.right - barBg.left) * norm), barBg.bottom };
-            const COLORREF colBar = (dbVal > -2.0f) ? colRed : ((dbVal > -12.0f) ? colAmber : colGreen);
-            fillRoundRect(memDc, barFill, sc(4, s), colBar, colBar);
-        }
-    };
-    drawMeter(22, L"IN", inDb);
-    drawMeter(164, L"OUT", outDb);
-
-    // Voice gate pill
-    RECT gatePill = scRect(RECT{ 312, 62, 396, 78 }, s);
-    fillRoundRect(memDc, gatePill, sc(6, s), gateOpen ? RGB(20, 62, 38) : colTrack, gateOpen ? colGreen : colBorder);
-    SelectObject(memDc, fontSec);
-    SetTextColor(memDc, gateOpen ? colGreen : colMuted);
-    DrawTextW(memDc, gateOpen ? L"VOICE" : L"QUIET", -1, &gatePill, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
-    // Auto Volume live readout
-    wchar_t agcBuf[32]{};
-    std::swprintf(agcBuf, 32, L"AUTO %+.1f dB", agcDb);
-    SelectObject(memDc, fontSec);
-    SetTextColor(memDc, agcOn && !bypassed ? colAccent : colTextDim);
-    RECT agcR = scRect(RECT{ 404, 58, kLogicalWidth - 20, 82 }, s);
-    DrawTextW(memDc, agcBuf, -1, &agcR, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-
-    // Preset bar (y = 88..114)
     SelectObject(memDc, fontSec);
     SetTextColor(memDc, colMuted);
-    RECT presetLbl = scRect(RECT{ 16, 88, 84, 114 }, s);
+    RECT presetLbl = scRect(RECT{ 16, 62, 84, 88 }, s);
     DrawTextW(memDc, L"PRESETS", -1, &presetLbl, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     for (int i = 0; i < kNumPresets; ++i) {
@@ -577,36 +561,38 @@ void AutoGainNSView::handlePaint() {
             : (hovered ? colBtnHover : colCard);
         const COLORREF border = active
             ? (bypassed ? colAccentDim : colAccent)
-            : (hovered ? colAccent : colBorder);
+            : (hovered ? colAccent : colCtrlBorder);
         RECT pPhys = scRect(kPresetRects[i], s);
         fillRoundRect(memDc, pPhys, sc(8, s), fill, border);
         SelectObject(memDc, fontDesc);
         SetTextColor(memDc, active ? (bypassed ? colMuted : colText) : colMuted);
         DrawTextW(memDc, kPresets[i].name, -1, &pPhys, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (hasKeyFocus_ && focusIndex_ == 2 + i) drawFocusRing(memDc, pPhys, sc(8, s), colAccent);
     }
 
-    // Input Routing bar (y = 120..146)
+    // Input Routing bar (y = 94..120)
     SelectObject(memDc, fontSec);
     SetTextColor(memDc, colMuted);
-    RECT inLbl = scRect(RECT{ 16, 120, 84, 146 }, s);
+    RECT inLbl = scRect(RECT{ 16, 94, 84, 120 }, s);
     DrawTextW(memDc, L"MIC INPUT", -1, &inLbl, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     for (int i = 0; i < 4; ++i) {
         const bool active = (inputMode == i);
         const bool hovered = (hoverKind_ == HoverKind::InputMode && hoverIndex_ == i);
         const COLORREF fill = active ? colPresetOn : (hovered ? colBtnHover : colCard);
-        const COLORREF border = (active || hovered) ? colAccent : colBorder;
+        const COLORREF border = (active || hovered) ? colAccent : colCtrlBorder;
         RECT mPhys = scRect(kInputModes[i].rect, s);
         fillRoundRect(memDc, mPhys, sc(8, s), fill, border);
         SelectObject(memDc, fontDesc);
         SetTextColor(memDc, active ? colText : colMuted);
         DrawTextW(memDc, kInputModes[i].name, -1, &mPhys, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (hasKeyFocus_ && focusIndex_ == 6 + i) drawFocusRing(memDc, mPhys, sc(8, s), colAccent);
     }
 
     // Section cards
-    fillRoundRect(memDc, scRect(RECT{ 12, 154, kLogicalWidth - 12, 322 }, s), sc(10, s), colCard, colBorder);
-    fillRoundRect(memDc, scRect(RECT{ 12, 330, kLogicalWidth - 12, 498 }, s), sc(10, s), colCard, colBorder);
-    fillRoundRect(memDc, scRect(RECT{ 12, 506, kLogicalWidth - 12, 600 }, s), sc(10, s), colCard, colBorder);
+    fillRoundRect(memDc, scRect(RECT{ 12, 128, kLogicalWidth - 12, 296 }, s), sc(10, s), colCard, colBorder);
+    fillRoundRect(memDc, scRect(RECT{ 12, 304, kLogicalWidth - 12, 472 }, s), sc(10, s), colCard, colBorder);
+    fillRoundRect(memDc, scRect(RECT{ 12, 480, kLogicalWidth - 12, 574 }, s), sc(10, s), colCard, colBorder);
 
     // Rows
     const int numRows = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
@@ -644,7 +630,7 @@ void AutoGainNSView::handlePaint() {
             const bool isOn = (norm >= 0.5);
             RECT togR = scRect(RECT{ kSliderLeft, row.y + 4, kSliderLeft + 62, row.y + 26 }, s);
             const COLORREF togFill = bypassed ? colTrack : (isOn ? RGB(22, 82, 48) : colTrack);
-            const COLORREF togBorder = (hovered && !bypassed) ? colText : (isOn && !bypassed ? colGreen : colBorder);
+            const COLORREF togBorder = (hovered && !bypassed) ? colText : (isOn && !bypassed ? colGreen : colCtrlBorder);
             fillRoundRect(memDc, togR, sc(10, s), togFill, togBorder);
             SelectObject(memDc, fontSec);
             SetTextColor(memDc, dimmed ? colTextDim : colText);
@@ -679,12 +665,16 @@ void AutoGainNSView::handlePaint() {
             RECT valR = scRect(RECT{ kSliderRight + 8, row.y, kLogicalWidth - 22, row.y + kRowHeight }, s);
             DrawTextW(memDc, valBuf, -1, &valR, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         }
+        if (hasKeyFocus_ && focusIndex_ == 10 + i) {
+            RECT rowPhys = scRect(RECT{ 16, row.y - 2, kLogicalWidth - 16, row.y + kRowHeight + 1 }, s);
+            drawFocusRing(memDc, rowPhys, sc(6, s), colAccent);
+        }
     }
 
     // Footer tip bar
-    const wchar_t* tip = L"Drag slider to adjust  •  Scroll wheel to fine-tune  •  Double-click slider to reset";
+    const wchar_t* tip = L"Drag slider to adjust  \x2022  Scroll wheel to fine-tune  \x2022  Double-click slider to reset";
     if (bypassed) {
-        tip = L"Plugin is DISABLED (raw mic passing through)  •  Click DISABLED to turn back on";
+        tip = L"Plugin is DISABLED (raw mic passing through)  \x2022  Click DISABLED to turn back on";
     } else if (hoverKind_ == HoverKind::Bypass) {
         tip = L"Click to turn AutoGainNS ON or OFF (compare processed vs raw mic)";
     } else if (hoverKind_ == HoverKind::Preset && hoverIndex_ >= 0 && hoverIndex_ < kNumPresets) {
@@ -698,15 +688,15 @@ void AutoGainNSView::handlePaint() {
         } else if (r.isToggle) {
             tip = L"Click to toggle Auto Volume ON/OFF";
         } else {
-            tip = L"Drag slider to adjust  •  Scroll wheel to fine-tune  •  Double-click to reset default";
+            tip = L"Drag slider to adjust  \x2022  Scroll wheel to fine-tune  \x2022  Double-click to reset default";
         }
     } else if (hoverKind_ == HoverKind::Reset) {
         tip = L"Reset all sliders and switches back to default settings";
     }
 
     SelectObject(memDc, fontDesc);
-    SetTextColor(memDc, bypassed ? colRed : colMuted);
-    RECT tipR = scRect(RECT{ 16, 608, kLogicalWidth - 16, 632 }, s);
+    SetTextColor(memDc, bypassed ? colRedText : colMuted);
+    RECT tipR = scRect(RECT{ 16, 580, kLogicalWidth - 16, 604 }, s);
     DrawTextW(memDc, tip, -1, &tipR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     BitBlt(hdc, 0, 0, physW, physH, memDc, 0, 0, SRCCOPY);
@@ -719,6 +709,11 @@ void AutoGainNSView::handlePaint() {
 
 void AutoGainNSView::handleMouseDown(int x, int y) {
     if (!controller_) return;
+    if (hwnd_) SetFocus(static_cast<HWND>(hwnd_));
+    if (hasKeyFocus_) {
+        hasKeyFocus_ = false;
+        refresh();
+    }
     const int lx = static_cast<int>(std::lround(static_cast<float>(x) / scaleFactor_));
     const int ly = static_cast<int>(std::lround(static_cast<float>(y) / scaleFactor_));
 
@@ -794,27 +789,10 @@ void AutoGainNSView::handleMouseDoubleClick(int x, int y) {
     if (!controller_) return;
     const int lx = static_cast<int>(std::lround(static_cast<float>(x) / scaleFactor_));
     const int ly = static_cast<int>(std::lround(static_cast<float>(y) / scaleFactor_));
-    const VoiceParams def{};
     for (const auto& row : kRows) {
         if (!row.isToggle && ly >= row.y && ly <= row.y + kRowHeight &&
             lx >= kSliderLeft - 8 && lx <= kSliderRight + 8) {
-            double defNorm = 0.0;
-            switch (row.id) {
-                case kParamHpfHz:            defNorm = rangeToNorm(def.hpfHz, 20.0, 160.0); break;
-                case kParamNsStrength:       defNorm = def.nsStrength; break;
-                case kParamVadThreshold:     defNorm = rangeToNorm(def.vadThreshold, 0.0, 0.95); break;
-                case kParamGateFloorDb:      defNorm = rangeToNorm(def.gateFloorDb, -60.0, 0.0); break;
-                case kParamTargetLufs:       defNorm = rangeToNorm(def.targetLufs, -28.0, -10.0); break;
-                case kParamAgcMaxBoostDb:    defNorm = rangeToNorm(def.agcMaxBoostDb, 0.0, 30.0); break;
-                case kParamAgcSpeed:         defNorm = def.agcSpeed; break;
-                case kParamLimiterCeilingDb: defNorm = rangeToNorm(def.limiterCeilingDb, -6.0, -0.1); break;
-                case kParamOutputGainDb:     defNorm = rangeToNorm(def.outputGainDb, -12.0, 12.0); break;
-                default: return;
-            }
-            controller_->beginEdit(row.id);
-            controller_->setParamNormalized(row.id, defNorm);
-            controller_->performEdit(row.id, defNorm);
-            controller_->endEdit(row.id);
+            resetParamToDefault(controller_, row.id);
             refresh();
             return;
         }
@@ -948,6 +926,102 @@ void AutoGainNSView::handleMouseWheel(int x, int y, int delta) {
             refresh();
             return;
         }
+    }
+}
+
+void AutoGainNSView::handleKeyDown(unsigned int vk) {
+    if (!controller_) return;
+    constexpr int kFocusCount = 20;
+    const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+    if (vk == VK_TAB) {
+        if (focusIndex_ < 0) {
+            focusIndex_ = shift ? (kFocusCount - 1) : 0;
+        } else {
+            focusIndex_ = (focusIndex_ + (shift ? kFocusCount - 1 : 1)) % kFocusCount;
+        }
+        hasKeyFocus_ = true;
+        refresh();
+        return;
+    }
+
+    if (focusIndex_ < 0) {
+        focusIndex_ = 0;
+        hasKeyFocus_ = true;
+    }
+
+    if (vk == VK_SPACE || vk == VK_RETURN) {
+        if (focusIndex_ == 0) {
+            const double next = (controller_->getParamNormalized(kParamBypass) >= 0.5) ? 0.0 : 1.0;
+            controller_->beginEdit(kParamBypass);
+            controller_->setParamNormalized(kParamBypass, next);
+            controller_->performEdit(kParamBypass, next);
+            controller_->endEdit(kParamBypass);
+        } else if (focusIndex_ == 1) {
+            controller_->resetDefaults();
+        } else if (focusIndex_ >= 2 && focusIndex_ < 2 + kNumPresets) {
+            controller_->applyPreset(focusIndex_ - 2);
+        } else if (focusIndex_ >= 6 && focusIndex_ < 10) {
+            const double norm = static_cast<double>(focusIndex_ - 6) / 3.0;
+            controller_->beginEdit(kParamInputMode);
+            controller_->setParamNormalized(kParamInputMode, norm);
+            controller_->performEdit(kParamInputMode, norm);
+            controller_->endEdit(kParamInputMode);
+        } else if (focusIndex_ >= 10 && focusIndex_ < 20) {
+            const auto& row = kRows[focusIndex_ - 10];
+            if (row.isToggle) {
+                const double next = (controller_->getParamNormalized(row.id) >= 0.5) ? 0.0 : 1.0;
+                controller_->beginEdit(row.id);
+                controller_->setParamNormalized(row.id, next);
+                controller_->performEdit(row.id, next);
+                controller_->endEdit(row.id);
+            }
+        }
+        hasKeyFocus_ = true;
+        refresh();
+        return;
+    }
+
+    if (focusIndex_ >= 10 && focusIndex_ < 20) {
+        const auto& row = kRows[focusIndex_ - 10];
+        if (!row.isToggle) {
+            double next = controller_->getParamNormalized(row.id);
+            bool changed = false;
+            const double step = shift ? 0.10 : 0.02;
+            if (vk == VK_RIGHT || vk == VK_UP) {
+                next = std::clamp(next + step, 0.0, 1.0);
+                changed = true;
+            } else if (vk == VK_LEFT || vk == VK_DOWN) {
+                next = std::clamp(next - step, 0.0, 1.0);
+                changed = true;
+            } else if (vk == VK_HOME) {
+                next = 0.0;
+                changed = true;
+            } else if (vk == VK_END) {
+                next = 1.0;
+                changed = true;
+            } else if (vk == VK_DELETE || vk == VK_BACK) {
+                resetParamToDefault(controller_, row.id);
+                hasKeyFocus_ = true;
+                refresh();
+                return;
+            }
+            if (changed) {
+                controller_->beginEdit(row.id);
+                controller_->setParamNormalized(row.id, next);
+                controller_->performEdit(row.id, next);
+                controller_->endEdit(row.id);
+                hasKeyFocus_ = true;
+                refresh();
+            }
+        }
+    }
+}
+
+void AutoGainNSView::handleKillFocus() {
+    if (hasKeyFocus_) {
+        hasKeyFocus_ = false;
+        refresh();
     }
 }
 

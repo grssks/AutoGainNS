@@ -199,6 +199,23 @@ void testBrickwallLimiter() {
     double maxDb = 20.0 * std::log10(std::max(maxAbs, 1e-12f));
     std::printf("  Peak Out: %.3f (%.2f dBFS, Ceiling: -1.00 dBFS)\n", maxAbs, maxDb);
     TEST_CHECK(maxDb <= -0.95);
+
+    // 4x True-Peak check: Fs/4 inter-sample peak (+0.88, +0.88, -0.88, -0.88) has sample peak -1.11 dBFS
+    // but true inter-sample peak ~+1.9 dBFS; True-Peak limiter must attenuate it below -1.0 dBFS.
+    proc.reset();
+    std::vector<float> ispIn(2048, 0.0f), ispOut(2048, 0.0f);
+    for (int i = 600; i < 1200; ++i) {
+        ispIn[i] = ((i & 2) == 0) ? 0.88f : -0.88f;
+    }
+    for (int pos = 0; pos < 2048; pos += 256) {
+        float* iArr[1] = { ispIn.data() + pos };
+        float* oArr[1] = { ispOut.data() + pos };
+        proc.process(iArr, oArr, 1, 256);
+    }
+    float ispSampleMax = 0.0f;
+    for (int i = 1250; i < 1650; ++i) ispSampleMax = std::max(ispSampleMax, std::abs(ispOut[i]));
+    std::printf("  4x True-Peak Out (from 0.88 Fs/4): %.3f\n", ispSampleMax);
+    TEST_CHECK(ispSampleMax < 0.78f); // attenuated below 0.88 despite sample peak (-1.11 dBFS) < ceiling (-1.00 dBFS)
 }
 
 void testBlockSizesAndSafety() {
@@ -422,13 +439,13 @@ void testVst3BinaryLoad() {
     TEST_CHECK(view->isPlatformTypeSupported(Steinberg::kPlatformTypeHWND) == Steinberg::kResultTrue);
     Steinberg::ViewRect vr{};
     TEST_CHECK(view->getSize(&vr) == Steinberg::kResultOk);
-    TEST_CHECK(vr.getWidth() == 540 && vr.getHeight() == 640);
+    TEST_CHECK(vr.getWidth() == 540 && vr.getHeight() == 610);
 
     Steinberg::IPlugViewContentScaleSupport* scaleSup = nullptr;
     TEST_CHECK(view->queryInterface(Steinberg::IPlugViewContentScaleSupport::iid, reinterpret_cast<void**>(&scaleSup)) == Steinberg::kResultOk && scaleSup != nullptr);
     TEST_CHECK(scaleSup->setContentScaleFactor(1.5f) == Steinberg::kResultOk);
     TEST_CHECK(view->getSize(&vr) == Steinberg::kResultOk);
-    TEST_CHECK(vr.getWidth() == 810 && vr.getHeight() == 960);
+    TEST_CHECK(vr.getWidth() == 810 && vr.getHeight() == 915);
     scaleSup->release();
 
     view->release();
@@ -439,7 +456,7 @@ void testVst3BinaryLoad() {
     factory->release();
     TEST_CHECK(exitFn());
     FreeLibrary(mod);
-    std::printf("  VST3 binary, state round-trip, Mono/Stereo, and 540x640 HiDPI IPlugView verified.\n");
+    std::printf("  VST3 binary, state round-trip, Mono/Stereo, and 540x610 HiDPI IPlugView verified.\n");
 }
 
 void testUniversalEdgeCases() {

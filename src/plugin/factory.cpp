@@ -14,7 +14,7 @@ DEF_CLASS2(
     stringPluginName,
     Vst::kDistributable,
     "Fx|Dynamics|Restoration",
-    "1.0.0",
+    "1.1.0",
     kVstVersionString,
     autogain::AutoGainNSProcessor::createInstance)
 
@@ -25,7 +25,7 @@ DEF_CLASS2(
     stringPluginName "Controller",
     0,
     "",
-    "1.0.0",
+    "1.1.0",
     kVstVersionString,
     autogain::AutoGainNSController::createInstance)
 

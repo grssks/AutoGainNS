@@ -11,7 +11,7 @@ class AutoGainNSView : public Steinberg::CPluginView,
                        public Steinberg::IPlugViewContentScaleSupport {
 public:
     static constexpr int kLogicalWidth = 540;
-    static constexpr int kLogicalHeight = 640;
+    static constexpr int kLogicalHeight = 610;
 
     explicit AutoGainNSView(AutoGainNSController* controller);
     ~AutoGainNSView() override;
@@ -41,7 +41,8 @@ public:
     void handleMouseWheel(int x, int y, int delta);
     void handleMouseLeave();
     void handleCaptureLost();
-    void handleTimer();
+    void handleKeyDown(unsigned int vk);
+    void handleKillFocus();
     bool isOverInteractive() const noexcept { return overInteractive_; }
 
 private:
@@ -60,6 +61,8 @@ private:
     int hoverIndex_ = -1;
     bool trackingMouse_ = false;
     bool overInteractive_ = false;
+    int focusIndex_ = -1;
+    bool hasKeyFocus_ = false;
 
     void* fontTitle_ = nullptr;
     void* fontSub_ = nullptr;

@@ -31,6 +31,11 @@ if (-not (Test-Path $rnnDataC)) {
     $modelVer = (Get-Content (Join-Path $rnnDir 'model_version') -Raw).Trim()
     $tarPath = Join-Path $tpDir "rnnoise_data-$modelVer.tar.gz"
     Invoke-WebRequest -Uri "https://media.xiph.org/rnnoise/models/rnnoise_data-$modelVer.tar.gz" -OutFile $tarPath
+    $actualHash = (Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $modelVer.ToLowerInvariant()) {
+        Remove-Item -LiteralPath $tarPath -Force -ErrorAction SilentlyContinue
+        throw "RNNoise model checksum mismatch: expected $modelVer, got $actualHash"
+    }
     tar -xzf $tarPath -C $rnnDir
     if ($LASTEXITCODE -ne 0) { throw 'Failed to extract RNNoise model weights' }
     Remove-Item -LiteralPath $tarPath -Force -ErrorAction SilentlyContinue

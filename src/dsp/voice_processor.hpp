@@ -3,7 +3,6 @@
 #include "biquad.hpp"
 #include "rnnoise_wrapper.hpp"
 #include <array>
-#include <atomic>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -54,16 +53,7 @@ inline void clampVoiceParams(VoiceParams& p) noexcept {
 }
 
 /**
- * Production Broadcast Voice Channel Strip:
- *  0. Input NaN/Inf Sanitizer & Input Routing (Auto / MonoSum / Left / Right)
- *  1. Sub-sonic / Plosive High-Pass Filter (2nd-order Butterworth)
- *  2. Xiph RNNoise Neural Noise Suppression (phase-aligned wet/dry, multi-rate safe, per-sample VAD)
- *  3. Neural VAD-Gated Soft Expander / Gate (2ms atk, 150ms hold, 180ms rel)
- *  4. ITU-R BS.1770-4 K-Weighted Speech-Gated AutoGain (400ms LUFS AGC, freezes during silence)
- *  5. Output Trim + 2ms O(1) Sliding-Window Lookahead Brickwall Limiter (0.4ms atk)
- *  6. Delay-Compensated Smooth Bypass Crossfade
- *
- * Supports Mono->Mono, Mono->Stereo, Stereo->Stereo. Zero heap allocations in process().
+ * Real-time voice DSP pipeline (allocation-free in process()).
  */
 class VoiceProcessor {
 public:
@@ -99,6 +89,7 @@ public:
             kStage2_[ch].reset();
             rnnoise_[ch].reset();
             limDelay_[ch].fill(0.0f);
+            tpHist_[ch].fill(0.0f);
             std::fill(dryBypassDelay_[ch].begin(), dryBypassDelay_[ch].end(), 0.0f);
         }
         limPeakRing_.fill(0.0f);
@@ -122,11 +113,6 @@ public:
         smoothGateFloorLin_ = std::pow(10.0f, params_.gateFloorDb / 20.0f);
         smoothLimCeilingLin_ = std::pow(10.0f, params_.limiterCeilingDb / 20.0f);
         smoothOutTrimLin_ = std::pow(10.0f, params_.outputGainDb / 20.0f);
-
-        telInPeakDb_.store(-120.0f, std::memory_order_relaxed);
-        telOutPeakDb_.store(-120.0f, std::memory_order_relaxed);
-        telAgcGainDb_.store(0.0f, std::memory_order_relaxed);
-        telGateGain_.store(1.0f, std::memory_order_relaxed);
     }
 
     void setParams(const VoiceParams& p) noexcept {
@@ -162,36 +148,21 @@ public:
         const int inCh = std::clamp(inChannels, 1, kMaxChannels);
         const int outCh = std::clamp(outChannels, 1, kMaxChannels);
 
-        float blockInPeak = 0.0f;
-        float blockOutPeak = 0.0f;
-
         int offset = 0;
         while (offset < numSamples) {
             const int chunk = std::min(numSamples - offset, kMaxBlockSize);
-            processChunk(inputs, outputs, inCh, outCh, offset, chunk, blockInPeak, blockOutPeak);
+            processChunk(inputs, outputs, inCh, outCh, offset, chunk);
             offset += chunk;
         }
-
-        const float inDb = (blockInPeak > 1e-6f) ? std::max(-120.0f, 20.0f * std::log10(blockInPeak)) : -120.0f;
-        const float outDb = (blockOutPeak > 1e-6f) ? std::max(-120.0f, 20.0f * std::log10(blockOutPeak)) : -120.0f;
-        telInPeakDb_.store(inDb, std::memory_order_relaxed);
-        telOutPeakDb_.store(outDb, std::memory_order_relaxed);
-        telAgcGainDb_.store(static_cast<float>(agcGainDb_), std::memory_order_relaxed);
-        telGateGain_.store(gateGain_, std::memory_order_relaxed);
 
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
         _mm_setcsr(oldMxcsr);
 #endif
     }
 
-    // Telemetry getters (real-time safe)
     double currentAgcGainDb() const noexcept { return agcGainDb_; }
     float currentGateGain() const noexcept { return gateGain_; }
     float currentVad() const noexcept { return vadSmooth_; }
-    float telemetryInDb() const noexcept { return telInPeakDb_.load(std::memory_order_relaxed); }
-    float telemetryOutDb() const noexcept { return telOutPeakDb_.load(std::memory_order_relaxed); }
-    float telemetryAgcDb() const noexcept { return telAgcGainDb_.load(std::memory_order_relaxed); }
-    float telemetryGateGain() const noexcept { return telGateGain_.load(std::memory_order_relaxed); }
 
 private:
     void updateFilters() noexcept {
@@ -206,8 +177,23 @@ private:
         return std::isfinite(raw) ? std::clamp(raw, -16.0f, 16.0f) : 0.0f;
     }
 
+    // 4x oversampled True-Peak estimator via Catmull-Rom cubic interpolation (+0 ms latency)
+    static inline float truePeak4x(const std::array<float, 4>& h) noexcept {
+        const float y0 = h[0], y1 = h[1], y2 = h[2], y3 = h[3];
+        float peak = std::max(std::abs(y2), std::abs(y3));
+        const float a = -0.5f * y0 + 1.5f * y1 - 1.5f * y2 + 0.5f * y3;
+        const float b = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+        const float c = -0.5f * y0 + 0.5f * y2;
+        const float d = y1;
+        for (float t : { 0.25f, 0.50f, 0.75f }) {
+            const float val = ((a * t + b) * t + c) * t + d;
+            peak = std::max(peak, std::abs(val));
+        }
+        return peak;
+    }
+
     void processChunk(float* const* inputs, float* const* outputs, int inCh, int outCh,
-                      int offset, int n, float& blockInPeak, float& blockOutPeak) noexcept {
+                      int offset, int n) noexcept {
         // Stage 0: Sanitize input (NaN/Inf guard), apply InputMode routing, and feed delay-compensated dry buffer
         const bool collapseToMono = (inCh == 1) || (params_.inputMode != kInputAuto);
         const int dspCh = collapseToMono ? 1 : 2;
@@ -231,16 +217,13 @@ private:
                     }
                 }
                 w0[i] = routed;
-                blockInPeak = std::max(blockInPeak, std::abs(routed));
             }
         } else {
             for (int ch = 0; ch < dspCh; ++ch) {
                 const float* src = inputs[ch] + offset;
                 float* w = work_[ch].data();
                 for (int i = 0; i < n; ++i) {
-                    const float clean = sanitizeSample(src[i]);
-                    w[i] = clean;
-                    blockInPeak = std::max(blockInPeak, std::abs(clean));
+                    w[i] = sanitizeSample(src[i]);
                 }
             }
         }
@@ -359,12 +342,14 @@ private:
                 }
             }
 
-            // Stage 5: Apply AGC + Output Trim BEFORE O(1) 2 ms Sliding-Window Lookahead Limiter
+            // Stage 5: Apply AGC + Output Trim BEFORE O(1) 2 ms Sliding-Window 4x True-Peak Lookahead Limiter
             const float agcAndTrimLin = static_cast<float>(std::pow(10.0, agcGainDb_ / 20.0)) * smoothOutTrimLin_;
             float samplePeak = 0.0f;
             for (int ch = 0; ch < dspCh; ++ch) {
                 work_[ch][i] *= agcAndTrimLin;
-                samplePeak = std::max(samplePeak, std::abs(work_[ch][i]));
+                auto& h = tpHist_[ch];
+                h[0] = h[1]; h[1] = h[2]; h[2] = h[3]; h[3] = work_[ch][i];
+                samplePeak = std::max(samplePeak, truePeak4x(h));
             }
 
             // O(1) monotonic deque sliding-window max over lookaheadSamples_
@@ -412,7 +397,6 @@ private:
                 const float dryDelayed = dryBypassDelay_[ch][dRead];
                 const float finalSample = std::clamp(wetOut * bypassMix_ + dryDelayed * (1.0f - bypassMix_), -1.0f, 1.0f);
                 outputs[ch][offset + i] = finalSample;
-                blockOutPeak = std::max(blockOutPeak, std::abs(finalSample));
             }
             if (dspCh == 1 && outCh == 2) {
                 const float monoOut = outputs[0][offset + i];
@@ -440,6 +424,7 @@ private:
     int bypassWriteIdx_ = 0;
 
     std::array<std::array<float, kMaxLookaheadSamples>, kMaxChannels> limDelay_{};
+    std::array<std::array<float, 4>, kMaxChannels> tpHist_{};
     std::array<float, kMaxLookaheadSamples> limPeakRing_{};
     std::array<int, kMaxLookaheadSamples> limDequeIdx_{};
     int limDequeHead_ = 0;
@@ -460,11 +445,6 @@ private:
     float smoothGateFloorLin_ = 0.0630957f;
     float smoothLimCeilingLin_ = 0.891251f;
     float smoothOutTrimLin_ = 1.0f;
-
-    std::atomic<float> telInPeakDb_{-120.0f};
-    std::atomic<float> telOutPeakDb_{-120.0f};
-    std::atomic<float> telAgcGainDb_{0.0f};
-    std::atomic<float> telGateGain_{1.0f};
 };
 
 } // namespace autogain

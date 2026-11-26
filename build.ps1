@@ -99,22 +99,40 @@ $cmdLines += "@echo off"
 $cmdLines += "call `"$vcvars`" >nul"
 $cmdLines += "if errorlevel 1 exit /b 1"
 
-# Compile RNNoise C files (baseline x64 SSE2 for maximum CPU compatibility)
-$rnnoiseFlags = '/nologo /c /O2 /MT /DRNNOISE_BUILD /D_CRT_SECURE_NO_WARNINGS /Ithird_party\rnnoise\include /Ithird_party\rnnoise\src /wd4244 /wd4305 /wd4018 /wd4267 /wd4996'
+# Compile RNNoise C files with x86 runtime CPU dispatch (SSE2 baseline + SSE4.1 + isolated AVX2)
+$rnnoiseCommonFlags = '/nologo /c /O2 /MT /DRNNOISE_BUILD /DRNN_ENABLE_X86_RTCD /DOPUS_X86_MAY_HAVE_SSE /DOPUS_X86_MAY_HAVE_SSE2 /D_CRT_SECURE_NO_WARNINGS /Ithird_party\rnnoise\include /Ithird_party\rnnoise\src /wd4244 /wd4305 /wd4018 /wd4267 /wd4996'
 $allObjs = @()
 $rnnoiseObjs = @()
+
+$rnnoiseRtcdSources = @(
+    @{ Path = 'third_party\rnnoise\src\x86\x86cpu.c';      Extra = '' },
+    @{ Path = 'third_party\rnnoise\src\x86\x86_dnn_map.c'; Extra = '' },
+    @{ Path = 'third_party\rnnoise\src\x86\nnet_sse4_1.c'; Extra = '/DOPUS_X86_MAY_HAVE_SSE4_1' },
+    @{ Path = 'third_party\rnnoise\src\x86\nnet_avx2.c';   Extra = '/arch:AVX2 /DOPUS_X86_MAY_HAVE_SSE4_1 /DOPUS_X86_MAY_HAVE_AVX2' }
+)
 
 foreach ($src in $rnnoiseSources) {
     $obj = Join-Path $objDir ([IO.Path]::GetFileNameWithoutExtension($src) + '.obj')
     $allObjs += "`"$obj`""
     $rnnoiseObjs += "`"$obj`""
     $cmdLines += "echo [CC] $src"
-    $cmdLines += "cl $rnnoiseFlags `"$src`" /Fo`"$obj`""
+    $cmdLines += "cl $rnnoiseCommonFlags `"$src`" /Fo`"$obj`""
+    $cmdLines += "if errorlevel 1 exit /b 1"
+}
+
+foreach ($entry in $rnnoiseRtcdSources) {
+    $src = $entry.Path
+    $extra = $entry.Extra
+    $obj = Join-Path $objDir ([IO.Path]::GetFileNameWithoutExtension($src) + '.obj')
+    $allObjs += "`"$obj`""
+    $rnnoiseObjs += "`"$obj`""
+    $cmdLines += "echo [CC] $src"
+    $cmdLines += "cl $rnnoiseCommonFlags $extra `"$src`" /Fo`"$obj`""
     $cmdLines += "if errorlevel 1 exit /b 1"
 }
 
 # Compile VST3 SDK + Plugin C++ files
-$cppFlags = '/nologo /c /O2 /MT /EHsc /std:c++17 /DRELEASE=1 /DNDEBUG /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS /Isrc /Ithird_party\rnnoise\include /Ithird_party\vst3sdk /wd4996 /wd4244 /wd4267'
+$cppFlags = '/nologo /c /O2 /MT /EHsc /std:c++17 /utf-8 /DRELEASE=1 /DNDEBUG /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS /Isrc /Ithird_party\rnnoise\include /Ithird_party\vst3sdk /wd4996 /wd4244 /wd4267'
 foreach ($src in ($sdkBaseSources + $pluginSources)) {
     $obj = Join-Path $objDir ([IO.Path]::GetFileNameWithoutExtension($src) + '.obj')
     $allObjs += "`"$obj`""

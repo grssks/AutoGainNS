@@ -22,7 +22,6 @@ public:
     Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) override;
     Steinberg::tresult PLUGIN_API setParamNormalized(
         Steinberg::Vst::ParamID tag, Steinberg::Vst::ParamValue value) override;
-    Steinberg::tresult PLUGIN_API notify(Steinberg::Vst::IMessage* message) override;
 
     void setActiveView(AutoGainNSView* view) noexcept {
         activeView_.store(view, std::memory_order_release);
@@ -34,19 +33,9 @@ public:
 
     void resetDefaults();
     void applyPreset(int presetIndex);
-    void requestTelemetry();
-
-    float telemetryInDb() const noexcept { return telInDb_.load(std::memory_order_relaxed); }
-    float telemetryOutDb() const noexcept { return telOutDb_.load(std::memory_order_relaxed); }
-    float telemetryAgcDb() const noexcept { return telAgcDb_.load(std::memory_order_relaxed); }
-    float telemetryGateGain() const noexcept { return telGateGain_.load(std::memory_order_relaxed); }
 
 private:
     std::atomic<AutoGainNSView*> activeView_{ nullptr };
-    std::atomic<float> telInDb_{ -120.0f };
-    std::atomic<float> telOutDb_{ -120.0f };
-    std::atomic<float> telAgcDb_{ 0.0f };
-    std::atomic<float> telGateGain_{ 0.0f };
 };
 
 } // namespace autogain

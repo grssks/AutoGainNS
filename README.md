@@ -1,10 +1,10 @@
 # AutoGainNS
 
-A self-contained, zero-dependency 64-bit Windows VST3 voice plugin for microphones. It combines AI background noise removal, a speech-aware gate, automatic volume leveling, and clip protection in one window.
+A lightweight, low-CPU 64-bit Windows VST3 voice plugin for microphones. Designed to run always-on in real time without a GPU, heavy frameworks, or external runtime DLLs. It combines AI background noise removal, a speech-aware gate, automatic volume leveling, and clip protection in one window.
 
-- **Zero runtime dependencies:** Static C++ runtime (`/MT`), embedded RNNoise neural weights, and standard Windows system DLLs only (`KERNEL32`, `USER32`, `GDI32`, `ole32`).
-- **Baseline x64 (SSE2):** Runs on any 64-bit x86_64 Windows CPU — no AVX2 required.
-- **12 ms latency** (`576` samples @ 48 kHz), allocation-free real-time `process()`.
+- **Low CPU & zero runtime dependencies:** Allocation-free real-time `process()`, static C++ runtime (`/MT`), and standard Windows system DLLs only (`KERNEL32`, `USER32`, `GDI32`, `ole32`). The `.vst3` binary is `~15 MB` because RNNoise's neural weights are embedded directly inside (no external model files needed).
+- **Universal x64 CPU support:** Baseline x64 (SSE2) with runtime SIMD dispatch (`SSE4.1` / `AVX2` for RNNoise via CPUID): fast on modern CPUs, safe on older ones.
+- **12 ms latency** (`576` samples @ 48 kHz: `10 ms` RNNoise frame + `2 ms` limiter lookahead).
 - **Multi-sample-rate:** Native `48 kHz` fast path plus anti-aliased resampling (`16 / 44.1 / 88.2 / 96 / 192 kHz`).
 
 ---
@@ -20,21 +20,18 @@ Mic Input ─▶ Input Routing ─▶ Low-Cut Filter ─▶ AI Noise Removal ─
 3. **AI Noise Removal:** Embedded Xiph.Org RNNoise reduces fans, keyboard clicks, and room hiss with phase-aligned Wet/Dry blending.
 4. **Voice Gate:** Per-sample neural Voice Activity Detection (`2 ms` attack, `150 ms` hold, `180 ms` release) keeps word starts intact while lowering background noise during pauses.
 5. **Auto Volume (ITU-R BS.1770-4 LUFS):** Measures loudness only while you speak and freezes during silence so room noise never pumps up between sentences. Supports up to `+30 dB` boost for quiet dynamic mics.
-6. **Clip Protection:** `2 ms` lookahead brickwall limiter (`0.4 ms` attack) stops sudden shouts from clipping past your ceiling.
+6. **Clip Protection:** `2 ms` 4x True-Peak lookahead brickwall limiter (`0.4 ms` attack) catches inter-sample peaks and stops sudden shouts from clipping past your ceiling.
 7. **Delay-Compensated Toggle:** Switching between **ENABLED** and **DISABLED** crossfades smoothly against a delay-matched dry signal with zero echo or timing jump.
 
 ---
 
-## Controls & Live Meters
+## Controls
 
-### Top Bar & Telemetry
+### Top Bar
 | Element | What it does |
 |---|---|
 | **ENABLED / DISABLED** | Turns processing ON or OFF cleanly (compare processed voice vs raw mic). |
 | **RESET** | Resets all sliders and switches back to defaults. |
-| **IN / OUT Meters** | Live input and output peak levels (`-60` to `0 dBFS`). |
-| **VOICE / QUIET** | Lights up green (`VOICE`) when the voice gate is open; `QUIET` during pauses or idle. |
-| **AUTO +X.X dB** | Shows how much gain Auto Volume is currently applying. |
 
 ### 1-Click Presets
 - **Balanced:** General-purpose defaults (`-16 LUFS`, `-24 dB` silence floor, `100%` AI noise removal).
@@ -57,7 +54,7 @@ Mic Input ─▶ Input Routing ─▶ Low-Cut Filter ─▶ AI Noise Removal ─
 - **Automatic Volume:** `Auto Volume` (`ON`/`OFF`), `Target Voice Volume` (`-28` to `-10 LUFS`), `Max Volume Boost` (`0` to `+30 dB`), `Leveling Speed` (`0–100%`).
 - **Protection & Output:** `Clip Protection` (`-6.0` to `-0.1 dBFS`), `Final Output Trim` (`-12` to `+12 dB`).
 
-*Tip: Drag any slider, scroll the mouse wheel to fine-tune, or double-click a slider to reset it to default.*
+*Tip: Drag any slider, scroll the mouse wheel to fine-tune, or double-click a slider to reset it. Keyboard navigation is also supported (`Tab` / `Shift+Tab` to move focus, `Enter` or `Space` to toggle, `Arrow` keys to adjust sliders, `Backspace` or `Delete` to reset).*
 
 ---
 
@@ -65,18 +62,18 @@ Mic Input ─▶ Input Routing ─▶ Low-Cut Filter ─▶ AI Noise Removal ─
 
 Prebuilt binaries are on the GitHub [Releases](../../releases) page (not kept in the source tree).
 
-1. Download the latest `AutoGainNS-*-win-x64.zip` from [Releases](../../releases) (or [build from source](#building-from-source)) and extract `AutoGainNS.vst3`.
-2. Copy the **`AutoGainNS.vst3`** bundle folder into your VST3 folder (usually `C:\Program Files\Common Files\VST3\AutoGainNS.vst3`), then rescan plugins in your host.
-3. For **system-wide Windows mic processing** (Discord, games, browsers), I personally load `AutoGainNS.vst3` using [EqualizerAPO-XT](https://github.com/115dkk/EqualizerAPO-XT) on my mic capture device (using **Input Mono / Output Mono** for a 1-channel mic).
+1. Download `AutoGainNS-v*-win-x64.zip` from [Releases](../../releases) (or [build from source](#building-from-source)) and extract the **`AutoGainNS.vst3`** folder bundle (keep its internal `Contents\x86_64-win\` structure intact).
+2. Copy the **`AutoGainNS.vst3`** folder into your VST3 directory (usually `C:\Program Files\Common Files\VST3\AutoGainNS.vst3`) and rescan plugins in your host.
+3. For **system-wide Windows mic processing** (Discord, games, browsers), I personally load it with [EqualizerAPO-XT](https://github.com/115dkk/EqualizerAPO-XT) on my mic capture device (select `AutoGainNS.vst3\Contents\x86_64-win\AutoGainNS.vst3` in the file picker, using **Input Mono / Output Mono** for a 1-channel mic).
 
 ### Compatibility
-Built against the standard Steinberg VST 3 SDK for 64-bit Windows (`Mono`, `Mono-to-Stereo`, and `Stereo`). It should work in any 64-bit Windows VST3 host, though I can't guarantee full compatibility everywhere — so far it's only been tested in [EqualizerAPO-XT](https://github.com/115dkk/EqualizerAPO-XT) and the included C++ test suite.
+Built against the standard Steinberg VST 3 SDK for 64-bit Windows (`Mono`, `Mono-to-Stereo`, and `Stereo`). It should work in any 64-bit Windows VST3 host, though full compatibility everywhere is not guaranteed; so far it has only been tested in [EqualizerAPO-XT](https://github.com/115dkk/EqualizerAPO-XT) and the included C++ test suite.
 
 ---
 
 ## Quick-Start by Microphone Setup
 
-- **USB Microphone (Condenser / Dynamic):** Keep **Mic Input** on `Auto`, pick **Discord / Gaming** or **Podcast / Natural**, and adjust **Voice Gate Sensitivity** until **QUIET** shows when you stop talking.
+- **USB Microphone (Condenser / Dynamic):** Keep **Mic Input** on `Auto`, pick **Balanced**, **Discord**, or **Podcast**, and adjust **Voice Gate Sensitivity** if room noise bleeds between sentences.
 - **2-Channel Audio Interface (Mic in Input 1, Input 2 empty):** If you only hear your mic on the left side, switch **Mic Input** to **`Left -> Both`** (or **`Right -> Both`** if plugged into Input 2).
 - **Quiet Dynamic Mic (e.g., SM7B, PodMic without inline preamp):** Raise **Max Volume Boost** up to `+24` to `+30 dB` so **Auto Volume** can lift your voice cleanly to `-16 LUFS`.
 
@@ -85,7 +82,7 @@ Built against the standard Steinberg VST 3 SDK for 64-bit Windows (`Mono`, `Mono
 ## Notes & Limitations
 
 - **64-bit Windows & 32-bit float only:** Currently targets Windows x64 and `kSample32` (`32-bit` float) VST3 audio streams.
-- **12 ms latency:** Adds `576` samples @ 48 kHz (`10 ms` RNNoise frame + `2 ms` limiter lookahead).
+- **Lightweight denoiser scope:** RNNoise is chosen for low CPU and `12 ms` latency. It cleans steady room noise, fans, hiss, and moderate clicks well, but isn't a heavy dereverb model for echoey rooms.
 
 ---
 
@@ -116,16 +113,16 @@ AutoGainNS/
 │   ├── dsp/
 │   │   ├── biquad.hpp           # 64-bit Butterworth HPF/LPF & ITU-R BS.1770-4 K-weighting
 │   │   ├── rnnoise_wrapper.hpp  # Multi-rate RNNoise wrapper & per-sample VAD
-│   │   └── voice_processor.hpp  # Complete real-time voice channel strip
+│   │   └── voice_processor.hpp  # Real-time voice DSP pipeline
 │   └── plugin/
 │       ├── ids.hpp              # Parameter IDs, range helpers, safe state serialization
-│       ├── processor.hpp/.cpp   # VST3 AudioEffect + bus routing + telemetry messaging
+│       ├── processor.hpp/.cpp   # VST3 AudioEffect + bus routing
 │       ├── controller.hpp/.cpp  # VST3 EditController + presets + parameter registration
 │       ├── editor_view.hpp/.cpp # HiDPI Win32 GDI UI (IPlugViewContentScaleSupport)
-│       ├── factory.cpp          # VST3 plugin factory (v1.0.0)
+│       ├── factory.cpp          # VST3 plugin factory (v1.1.0)
 │       └── exports.def          # DLL entry points (InitDll, ExitDll, GetPluginFactory)
 ├── scripts/
-│   └── fetch_deps.ps1           # Fetches Steinberg VST 3 SDK + Xiph RNNoise & weights
+│   └── fetch_deps.ps1           # Fetches Steinberg VST 3 SDK + Xiph RNNoise & weights (SHA-256 verified)
 ├── tests/
 │   └── test_dsp.cpp             # Automated DSP, multi-rate, state & VST3 binary test suite
 ├── build.ps1                    # Self-contained MSVC build & test script

@@ -6,8 +6,7 @@
 namespace autogain {
 
 /**
- * 64-bit double-precision Direct Form II Transposed Biquad filter.
- * Zero dynamic allocation, real-time safe.
+ * 64-bit Direct Form II Transposed Biquad filter (zero dynamic allocation).
  */
 class Biquad {
 public:
